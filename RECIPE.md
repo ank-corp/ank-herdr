@@ -24,7 +24,9 @@ person's Herdr theme and fonts.
    the hidden files/changes side panel, and the 28px status bar.
 3. **ank panel**, 320px (240 to 640), `surface` background, 10px padding,
    13px text, a 1px `border` divider on its left. Top to bottom:
-   - the repo's folder name (`ank-herdr`), in `foreground`;
+   - the repo's folder name (`ank-herdr`), in `foreground`, with a `change`
+     control at the right of that line in `dim` (`cancel` while the repo
+     picker is open under it);
    - `<branch> · <ank identity>` (`main · seanl@sean-laptop`), in `dim`;
    - `<n> fault(s) · <n> signal(s)` from `ank status`, in `dim`;
    - four collapsible sections, each headed by `▾`/`▸` in `dim`, a title in
@@ -51,8 +53,24 @@ person's Herdr theme and fonts.
   terminal's folder changes, the panel asks `ank status --json` there. Inside
   an ank repo it shows that repo; in a folder outside any ank repo, on another
   machine or on a mod pane, it keeps the last repo it showed. With no repo
-  shown yet it reads "Focus a terminal inside an ank repository." While the
-  first reads run it shows "Reading…".
+  shown yet it reads "Focus a terminal inside an ank repository, or pick
+  one." above the repo picker. While the first reads run it shows "Reading…".
+- **Repo picker.** Shown when there is no repo to show, and under the header
+  when `change` is clicked. It lists the distinct ank repos found in the
+  folders of the open terminals on this machine (`terminals()`, each `cwd`
+  asked with `ank status --json`, the repo shown left out): the folder name
+  in `foreground`, its root truncated in `dim`; "Looking in the open
+  terminals…" while asked, "No other ank repository in the open terminals."
+  when none. Below, **Open folder…** opens the system folder picker
+  (`pickFolder`, confirm button "Show in ank"). Picking either shows that
+  repo; a folder in no ank repo is refused with "<folder> is in no ank
+  repository." and a cancel changes nothing. The list is asked again when
+  the set of terminal folders changes.
+- **Remembered.** The root of the repo shown, picked or followed, is stored
+  in `localStorage` (`repo`: `{"root": ...}`). At start it is asked again with
+  `ank status --json` and shown if it is still an ank repo, unless focus has
+  already found one. Focusing a terminal inside another ank repo still
+  switches the panel; outside any, the picked repo stays.
 - **Refreshes on change, never on a timer.** It watches the repo's `.ank/`
   folder and the git `refs/ank` folder (the common git dir, so worktrees
   share it). Any claim, done, log or ratification, by anyone in any terminal,
@@ -109,9 +127,12 @@ person's Herdr theme and fonts.
   - `lib/start.js`: `startMessage`, `installedAgents`, `startCommand`,
     `claimableIds`.
   - `lib/accept.js`: `acceptGate`, `acceptCommand`, `acceptOutcome`.
-- **`herdr` functions**: `theme`, `focused`, `panes`, `spaces`, `exec`,
-  `home`, `watchFolder`, `knownAgents`, `notify`, `run` (the command
-  `tab.new {folder, argv, name, task}`).
+  - `lib/pick.js`: `terminalCwds`, `repoCandidates`, `pickOutcome`,
+    `STORE_KEY`, `storeValue`, `storedRoot`, `restoredRepo`.
+- **`herdr` functions**: `theme`, `focused`, `panes`, `spaces`, `terminals`,
+  `exec`, `home`, `watchFolder`, `knownAgents`, `notify`, `pickFolder`, `run`
+  (the command `tab.new {folder, argv, name, task}`); and the built-in
+  `localStorage`.
 - **Programs it runs** (`exec`), in the repo root or the focused folder:
   `ank status --json`, `ank find --status open --json`, `ank review --json`,
   `ank graph --json`, `ank context . --json` (focused folder),
@@ -152,8 +173,11 @@ person's Herdr theme and fonts.
   accept is recorded under that identity.
 - ank 0.9.5 reports no default branch in a repo with no `origin`: accept stays
   disabled there.
-- Remote terminals (another machine) are not followed: `watchFolder` watches
-  this machine only.
+- Remote terminals (another machine) are not followed, nor offered in the
+  repo picker (their `terminals()` address carries `machine/`): `watchFolder`
+  watches this machine only.
+- `localStorage` values are strings: store `JSON.stringify` and read back
+  defensively (a bad value restores nothing).
 - Assumes `ank` (contract 1, tested with 0.9.5) and `git` on the PATH Herdr
   sees.
 
@@ -166,6 +190,8 @@ person's Herdr theme and fonts.
   identity, and the four sections filled from that repo.
 - Focusing a terminal outside any ank repo keeps the last repo shown, never
   "contract none".
+- With no repo shown, the panel lists the ank repos of the open terminals and
+  Open folder…; picking one shows it, and it is shown again after a restart.
 - `ank claim <id>` in any terminal of that repo turns the task's row to
   `claimed by <holder>` with no click and no timer.
 - A start control opens a tab in the repo root running the chosen agent with

@@ -1,12 +1,13 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, focused, panes, spaces, exec, home, watchFolder, knownAgents, notify, run as command } from "herdr";
+import { theme, focused, panes, spaces, terminals, exec, home, watchFolder, knownAgents, notify, pickFolder, run as command } from "herdr";
 import { CONTRACT } from "./lib/version.js";
 import { IncompatibleContract, statusView, openTasksView, reviewView, graphView, contextView } from "./lib/adapters.js";
 import { resolveRepo, sameRepo, ankProgram, repoName, parentDir, touches, corpusChanges, GIT_ARGS } from "./lib/repo.js";
 import { sections, READS as SECTION_READS } from "./lib/sections.js";
 import { installedAgents, startCommand, claimableIds, CLAIMABLE_READ } from "./lib/start.js";
 import { acceptGate, acceptCommand, acceptOutcome } from "./lib/accept.js";
+import { terminalCwds, repoCandidates, pickOutcome, STORE_KEY, storeValue, storedRoot, restoredRepo } from "./lib/pick.js";
 
 const READS = [...SECTION_READS, CLAIMABLE_READ];
 
@@ -47,7 +48,97 @@ export default class Ank extends View {
     this.agents = null; // installed knownAgents(), null while asked
     this.pickError = null;
     this.accepting = new Set(); // ids whose ank accept is running
+    this.choosing = false; // the header's change control is open
+    this.candidates = null; // repos under the open terminals, null while probed
+    this.probed = null; // the terminal cwds the candidates were read from
+    this.chooseError = null;
+    this.restore();
     this.follow(focusedCwd());
+  }
+
+  // The repo stored by the last run, re-read through ank; focus that has found
+  // a repo meanwhile wins (ADR-2df9).
+  restore() {
+    const root = storedRoot(localStorage.getItem(STORE_KEY));
+    if (!root) return;
+    this.cx.spawn(async (cx) => {
+      const ank = await run(this.ank, ["status", "--json"], root);
+      const git = ank && ank.code === 0 ? await run("git", GIT_ARGS, root) : null;
+      const repo = restoredRepo({ current: this.repo, root, ank, git });
+      if (repo && !this.repo) {
+        this.folder = root;
+        await this.show(repo, cx);
+      }
+    });
+  }
+
+  // Shows `repo`, rewatches and stores it when it is another one, and reloads.
+  async show(repo, cx) {
+    this.state = "repo";
+    this.found = null;
+    if (!sameRepo(repo, this.repo)) {
+      this.repo = repo;
+      this.status = null;
+      this.views = {};
+      this.watch(cx);
+      localStorage.setItem(STORE_KEY, storeValue(repo));
+    }
+    await this.reload(cx);
+  }
+
+  // The picker is drawn: probe the ank repos under the open terminals' cwds,
+  // again whenever that set of folders changes (render runs on terminals()).
+  probe() {
+    const cwds = terminalCwds(terminals());
+    const probed = cwds.join("|");
+    if (probed === this.probed) return;
+    this.probed = probed;
+    this.candidates = null;
+    this.cx.spawn(async (cx) => {
+      const probes = await Promise.all(
+        cwds.map(async (cwd) => {
+          const ank = await run(this.ank, ["status", "--json"], cwd);
+          const git = ank && ank.code === 0 ? await run("git", GIT_ARGS, cwd) : null;
+          return { cwd, ank, git };
+        }),
+      );
+      if (probed === this.probed) this.candidates = repoCandidates(probes, this.repo);
+      cx.notify();
+    });
+  }
+
+  // A candidate's root, or (root null) the folder the system picker answers.
+  choose(root, cx) {
+    this.chooseError = null;
+    cx.notify();
+    this.cx.spawn(async (cx) => {
+      let folder;
+      try {
+        folder = root ?? (await pickFolder({ prompt: "Show in ank" }));
+      } catch (e) {
+        this.chooseError = `pickFolder failed: ${e?.message ?? e}`;
+        return cx.notify();
+      }
+      const ank = folder ? await run(this.ank, ["status", "--json"], folder) : null;
+      const git = ank && ank.code === 0 ? await run("git", GIT_ARGS, folder) : null;
+      const out = pickOutcome({ folder, ank, git });
+      if (out.cancelled) return cx.notify();
+      if (out.error) {
+        this.chooseError = out.error;
+        return cx.notify();
+      }
+      this.choosing = false;
+      this.probed = null;
+      this.folder = folder;
+      await this.show(out.repo, cx);
+    });
+  }
+
+  toggleChoosing(cx) {
+    this.choosing = !this.choosing;
+    this.chooseError = null;
+    this.probed = null;
+    cx.notify();
   }
 
   // Herdr re-renders mods when focus moves; a new folder starts a resolution.
@@ -66,12 +157,9 @@ export default class Ank extends View {
       const next = resolveRepo({ cwd, last: this.repo, ank, git });
       this.state = next.state;
       this.found = next.found ?? null;
-      if (next.state === "repo") this.folder = cwd;
-      if (!sameRepo(next.repo, this.repo)) {
-        this.repo = next.repo;
-        this.status = null;
-        this.views = {};
-        this.watch(cx);
+      if (next.state === "repo") {
+        this.folder = cwd;
+        return this.show(next.repo, cx);
       }
       await this.reload(cx);
     });
@@ -214,6 +302,38 @@ export default class Ank extends View {
     });
   }
 
+  // The repos under the open terminals, then the system folder picker.
+  chooser(t) {
+    this.probe();
+    const box = v_flex().gap(2).pt(4).pb(6);
+    if (!this.candidates) box.child(div().text_color(t.dim).child("Looking in the open terminals…"));
+    else if (this.candidates.length === 0) box.child(div().text_color(t.dim).child("No other ank repository in the open terminals."));
+    else {
+      for (const c of this.candidates) {
+        box.child(
+          h_flex()
+            .id(`ank-repo-${c.root}`)
+            .gap(6)
+            .min_w_0()
+            .cursor_pointer()
+            .on_click((_e, cx) => this.choose(c.root, cx))
+            .child(div().flex_shrink_0().text_color(t.foreground).child(c.name))
+            .child(div().min_w_0().truncate().text_color(t.dim).child(c.root)),
+        );
+      }
+    }
+    box.child(
+      div()
+        .id("ank-open-folder")
+        .cursor_pointer()
+        .text_color(t.foreground)
+        .on_click((_e, cx) => this.choose(null, cx))
+        .child("Open folder…"),
+    );
+    if (this.chooseError) box.child(div().text_color(t.dim).child(this.chooseError));
+    return box;
+  }
+
   picker(id, t) {
     const box = v_flex().pl(28).gap(2);
     if (this.pickError) return box.child(div().text_color(t.dim).child(this.pickError));
@@ -242,9 +362,27 @@ export default class Ank extends View {
         .child(line(`ank speaks contract ${this.found ?? "none"}; this panel reads contract ${CONTRACT}`, t.dim));
     }
     if (!this.repo) {
-      return col.child(line("ank")).child(line("Focus a terminal inside an ank repository.", t.dim));
+      return col
+        .child(line("ank"))
+        .child(line("Focus a terminal inside an ank repository, or pick one.", t.dim))
+        .child(this.chooser(t));
     }
-    col.child(line(repoName(this.repo.root)));
+    col.child(
+      h_flex()
+        .gap(6)
+        .min_w_0()
+        .child(div().flex_1().min_w_0().truncate().text_color(t.foreground).child(repoName(this.repo.root)))
+        .child(
+          div()
+            .id("ank-change-repo")
+            .flex_shrink_0()
+            .cursor_pointer()
+            .text_color(t.dim)
+            .on_click((_e, cx) => this.toggleChoosing(cx))
+            .child(this.choosing ? "cancel" : "change"),
+        ),
+    );
+    if (this.choosing) col.child(this.chooser(t));
     if (this.error) return col.child(line(this.error, t.dim));
     const s = this.status;
     if (!s) return col.child(line("Reading…", t.dim));
