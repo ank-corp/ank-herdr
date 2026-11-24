@@ -1,10 +1,13 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, focused, panes, spaces, exec, home, watchFolder } from "herdr";
+import { theme, focused, panes, spaces, exec, home, watchFolder, knownAgents, run as command } from "herdr";
 import { CONTRACT } from "./lib/version.js";
 import { IncompatibleContract, statusView, openTasksView, reviewView, graphView, contextView } from "./lib/adapters.js";
 import { resolveRepo, sameRepo, ankProgram, repoName, parentDir, touches, corpusChanges, GIT_ARGS } from "./lib/repo.js";
-import { sections, READS } from "./lib/sections.js";
+import { sections, READS as SECTION_READS } from "./lib/sections.js";
+import { installedAgents, startCommand, claimableIds, CLAIMABLE_READ } from "./lib/start.js";
+
+const READS = [...SECTION_READS, CLAIMABLE_READ];
 
 // The focused terminal's folder, or null when it is a mod pane or on another
 // machine (watchFolder watches this machine only).
@@ -19,7 +22,7 @@ function focusedCwd() {
 
 const run = (program, args, cwd) => exec(program, args, { cwd }).catch(() => null);
 
-const ADAPT = { open: openTasksView, review: reviewView, graph: graphView, context: contextView };
+const ADAPT = { open: openTasksView, review: reviewView, graph: graphView, context: contextView, ready: contextView };
 
 // Refreshes only on a change of focused folder and on watchFolder events on the
 // repo's .ank/ and refs/ank (ADR-5468): no cx.timer, no sleep, no poll.
@@ -39,6 +42,9 @@ export default class Ank extends View {
     this.loading = false;
     this.dirty = false;
     this.collapsed = new Set();
+    this.picking = null; // the task whose agent picker is open
+    this.agents = null; // installed knownAgents(), null while asked
+    this.pickError = null;
     this.follow(focusedCwd());
   }
 
@@ -151,6 +157,58 @@ export default class Ank extends View {
     cx.notify();
   }
 
+  // The start button: opens the picker of installed agents for task `id`.
+  pick(id, cx) {
+    if (this.picking === id) {
+      this.picking = null;
+      return cx.notify();
+    }
+    this.picking = id;
+    this.agents = null;
+    this.pickError = null;
+    cx.notify();
+    this.cx.spawn(async (cx) => {
+      try {
+        const agents = installedAgents(await knownAgents());
+        if (this.picking === id) this.agents = agents;
+      } catch (e) {
+        if (this.picking === id) this.pickError = `knownAgents failed: ${e?.message ?? e}`;
+      }
+      cx.notify();
+    });
+  }
+
+  // Opens the agent's tab in the repo root; the agent claims the task itself
+  // (ADR-99bc): no ank command runs here.
+  start(id, agent, cx) {
+    this.picking = null;
+    try {
+      const { name, args } = startCommand({ root: this.repo?.root, agent, id });
+      command(name, args);
+    } catch (e) {
+      this.error = `could not start ${id}: ${e?.message ?? e}`;
+    }
+    cx.notify();
+  }
+
+  picker(id, t) {
+    const box = v_flex().pl(28).gap(2);
+    if (this.pickError) return box.child(div().text_color(t.dim).child(this.pickError));
+    if (!this.agents) return box.child(div().text_color(t.dim).child("Looking for agents…"));
+    if (this.agents.length === 0) return box.child(div().text_color(t.dim).child("No installed agent."));
+    for (const a of this.agents) {
+      box.child(
+        div()
+          .id(`ank-agent-${id}-${a.key}`)
+          .cursor_pointer()
+          .text_color(t.foreground)
+          .on_click((_e, cx) => this.start(id, a, cx))
+          .child(a.name ?? a.key),
+      );
+    }
+    return box;
+  }
+
   draw() {
     const t = theme();
     const line = (text, color = t.foreground) => div().text_color(color).child(text);
@@ -167,6 +225,7 @@ export default class Ank extends View {
     if (this.error) return col.child(line(this.error, t.dim));
     const s = this.status;
     if (!s) return col.child(line("Reading…", t.dim));
+    this.claimable = claimableIds(this.views.ready);
     col
       .child(line(`${s.branch ?? "no branch"} · ${s.identity ?? "no identity"}`, t.dim))
       .child(line(`${s.faults} fault(s) · ${s.signals} signal(s)`, t.dim));
@@ -199,10 +258,20 @@ export default class Ank extends View {
     const h = h_flex().gap(6).pl(14).min_w_0();
     if (key === "tasks") {
       const claimed = r.status === "claimed";
-      return h
-        .child(id)
+      h.child(id)
         .child(title(r.title ?? r.id))
         .child(div().flex_shrink_0().text_color(claimed ? t.working : t.idle).child(claimed ? `claimed by ${r.holder ?? "?"}` : r.status));
+      if (claimed || !this.claimable?.has(r.id)) return h;
+      h.child(
+        div()
+          .id(`ank-start-${r.id}`)
+          .flex_shrink_0()
+          .cursor_pointer()
+          .text_color(t.foreground)
+          .on_click((_e, cx) => this.pick(r.id, cx))
+          .child(this.picking === r.id ? "cancel" : "start"),
+      );
+      return this.picking === r.id ? v_flex().child(h).child(this.picker(r.id, t)) : h;
     }
     if (key === "queue") return h.child(id).child(title(r.title)).child(div().flex_shrink_0().text_color(t.dim).child(r.kind));
     if (key === "tree") {
