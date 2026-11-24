@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { resolveRepo, ankProgram, repoName } from "../mods/ank/lib/repo.js";
+import { resolveRepo, ankProgram, repoName, parentDir, touches, corpusChanges } from "../mods/ank/lib/repo.js";
 
 const fixture = (path) => readFileSync(new URL(`./fixtures/${path}`, import.meta.url), "utf8");
 
@@ -102,4 +102,31 @@ test("repo name: the root's last segment, either separator", () => {
   assert.equal(repoName("C:/Users/me/work/proj"), "proj");
   assert.equal(repoName("D:\\code\\x\\"), "x");
   assert.equal(repoName("/home/me/ank-herdr"), "ank-herdr");
+});
+
+test("corpusChanges: ank's own index writes are not a change", () => {
+  assert.deepEqual(corpusChanges(["C:\\r\\.ank\\index.db.15", "C:\\r\\.ank\\index.db.15-wal", "/r/.ank/index.db.15-shm"]), []);
+  assert.deepEqual(corpusChanges(["C:\\r\\.ank\\entities\\TASK-1.md", "C:\\r\\.ank\\index.db.15"]), [
+    "C:\\r\\.ank\\entities\\TASK-1.md",
+  ]);
+  assert.deepEqual(corpusChanges(["C:\\r\\.ank"]), ["C:\\r\\.ank"]);
+});
+
+test("parentDir: the folder above, either separator", () => {
+  assert.equal(parentDir("C:/r/.git/refs/ank"), "C:/r/.git/refs");
+  assert.equal(parentDir("C:\\r\\.git\\refs\\ank\\"), "C:\\r\\.git\\refs");
+  assert.equal(parentDir("/r/.git/refs/ank"), "/r/.git/refs");
+});
+
+test("touches: only batches about refs/ank, or the parent root", () => {
+  const dir = "C:/r/.git/refs/ank";
+  assert.equal(touches(["C:\\r\\.git\\refs\\heads\\main"], dir), false);
+  assert.equal(touches(["C:\\r\\.git\\refs\\ankle"], dir), false);
+  assert.equal(touches(["C:\\r\\.git\\refs\\ank"], dir), true);
+  assert.equal(touches(["c:/r/.git/refs/ank/claims/TASK-1"], dir), true);
+  assert.equal(touches(["C:/r/.git/refs"], dir), true);
+  assert.equal(touches([], dir), false);
+  // as herdr's watchFolder reports them on Windows
+  assert.equal(touches(["\\\\?\\C:\\r\\.git\\refs\\ank\\claims\\TASK-1"], dir), true);
+  assert.equal(touches(["\\\\?\\C:\\r\\.git\\refs\\heads\\main"], dir), false);
 });

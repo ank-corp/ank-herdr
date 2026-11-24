@@ -48,3 +48,32 @@ export const repoName = (root) => root.split(/[\\/]+/).filter(Boolean).pop() ?? 
 
 // Two resolutions name the same repo: no reload or rewatch is owed.
 export const sameRepo = (a, b) => (a?.root ?? null) === (b?.root ?? null);
+
+// The folder above one: refs/ank does not exist until the first claim or
+// ratification, and watching a missing folder rejects, so its parent is
+// watched instead until it appears.
+export const parentDir = (dir) => dir.replace(/[\\/]+[^\\/]+[\\/]*$/, "");
+
+// watchFolder reports Windows paths in their verbatim form, \\?\C:\...
+const norm = (p) =>
+  p
+    .replace(/\\/g, "/")
+    .replace(/^\/\/\?\//, "")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+
+// Every ank read, the panel's own included, rewrites its index under
+// .ank/index.db*: a batch holding nothing else is the panel hearing itself, and
+// reloading on it would read, write the index and reload again for ever.
+export const corpusChanges = (paths) => paths.filter((p) => !/[\\/]\.ank[\\/]index\.db[^\\/]*$/i.test(p));
+
+// A batch from the parent's watch concerns `dir`: a path at or under it, or
+// the parent itself (a batch holding the root means refresh everything).
+export function touches(paths, dir) {
+  const d = norm(dir);
+  const parent = norm(parentDir(dir));
+  return paths.some((p) => {
+    const n = norm(p);
+    return n === d || n.startsWith(`${d}/`) || n === parent;
+  });
+}
