@@ -20,14 +20,16 @@ export const GIT_ARGS = ["rev-parse", "--path-format=absolute", "--show-toplevel
 //   kept          cwd in no ank repo, no cwd, or ank could not run: the last repo
 //   empty         as kept, with no last repo: null
 //   incompatible  ank printed another contract or none: the last repo, and found
-// A result is { code, stdout }; null when the program could not be started.
+// A result is { code, stdout, stderr }; null when the program could not be
+// started. ank prints an error's JSON on stderr with stdout empty (no .ank/ from
+// the cwd, for one), so stderr is read when stdout holds nothing.
 export function resolveRepo({ cwd, last, ank, git }) {
   const keep = (extra) => ({ repo: last ?? null, state: last ? "kept" : "empty", ...extra });
   if (!cwd || !ank) return keep();
 
   let value;
   try {
-    value = JSON.parse(ank.stdout);
+    value = JSON.parse(ank.stdout?.trim() ? ank.stdout : ank.stderr ?? "");
   } catch {
     value = undefined;
   }

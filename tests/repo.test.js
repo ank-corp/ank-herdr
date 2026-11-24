@@ -10,11 +10,9 @@ import { resolveRepo, ankProgram, repoName, parentDir, touches, corpusChanges } 
 const fixture = (path) => readFileSync(new URL(`./fixtures/${path}`, import.meta.url), "utf8");
 
 const inRepo = { code: 0, stdout: fixture("full/status.json"), stderr: "" };
-const noRepo = {
-  code: 1,
-  stdout: '{"contract":1,"error":{"code":1,"name":"Generic","message":"no .ank/ found from C:\\\\Users\\\\me","next":["ank init"],"subject":null}}',
-  stderr: "",
-};
+// Captured from `ank status --json` run in a folder under no git and no .ank/:
+// exit 1, nothing on stdout, the error JSON on stderr (TASK-80f33d6f530e).
+const noRepo = { code: 1, stdout: "", stderr: fixture("norepo/status.stderr.json") };
 const git = { code: 0, stdout: "C:/Users/me/work/proj\nC:/Users/me/work/proj/.git\n", stderr: "" };
 
 const proj = {
@@ -51,6 +49,11 @@ test("ank could not run there: the last repo is kept", () => {
 
 test("no focused cwd (a mod pane has focus): the last repo is kept", () => {
   assert.deepEqual(resolveRepo({ cwd: null, last: proj, ank: null, git: null }), { repo: proj, state: "kept" });
+});
+
+test("no last repo, cwd in no ank repo, error on stderr: empty state, not an incompatibility", () => {
+  const out = resolveRepo({ cwd: "C:/Users/me/AppData/Local/Temp/norepo-probe", last: null, ank: noRepo, git: null });
+  assert.deepEqual(out, { repo: null, state: "empty" });
 });
 
 test("no last repo and cwd in no ank repo: empty state", () => {
