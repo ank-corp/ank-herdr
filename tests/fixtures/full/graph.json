@@ -1,0 +1,1 @@
+{"contract":1,"path":".","tasks":[{"id":"TASK-0cba7e9a10f6","short":"TASK-0cba","status":"open","title":"Open task"},{"id":"TASK-231f68753d8c","short":"TASK-231f","status":"open","title":"Blocked task"},{"id":"TASK-96815ca5ecd3","short":"TASK-9681","status":"in_progress","title":"Claimed task"}],"edges":[{"task":"TASK-231f68753d8c","blocked_by":"TASK-96815ca5ecd3"}]}
