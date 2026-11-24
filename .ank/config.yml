@@ -1,0 +1,19 @@
+schema: 2
+requires_ank: 0.9.5
+context_budget: 8000
+claim_ttl_max: 2h
+verifiers: {}
+roles:
+  agent:
+    can: [context, find, claim, log, done, new:task, new:adr:proposed]
+    cannot: [adr:accept, adr:edit-constraint, task:close, delete]
+  human:
+    can: ["*"]
+identities:
+  "seanl@sean-laptop": human
+permissions:
+  enforce: warn
+weight:
+  hot_files: 3000
+  plane_bytes: 4000000
+default_branch: main
