@@ -5,7 +5,7 @@ slug: repo-laid-out-like-the-herdr-config-home
 title: Repo laid out like the Herdr config home
 created: 2026-11-24T14:18:46Z
 author: seanl@sean-laptop
-status: proposed
+status: accepted
 scope:
   - layouts/**
   - RECIPE.md
@@ -13,8 +13,13 @@ scope:
   - mods/ank/**
 constraint: |
   The repo root mirrors the Herdr config home: layouts/ank.json and mods/ank/, with RECIPE.md and preview.png at the root, and the repo carries the topics herdr-layout and herdr-mod.
+ratified: 4019cd6d671d
+anchor: 4369f45d433abb4ad21025987e7d344bc15b5af4
+verified:
+  - by: seanl@sean-laptop
+    at: 2026-11-24T14:21:02Z
 schema: 4
-version: 3
+version: 4
 ---
 
 This is the shape herdr.dev indexes and the shape an agent copies into ~/.config/herdr-app when installing.
