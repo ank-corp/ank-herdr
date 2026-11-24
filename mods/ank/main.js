@@ -1,11 +1,12 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, focused, panes, spaces, exec, home, watchFolder, knownAgents, run as command } from "herdr";
+import { theme, focused, panes, spaces, exec, home, watchFolder, knownAgents, notify, run as command } from "herdr";
 import { CONTRACT } from "./lib/version.js";
 import { IncompatibleContract, statusView, openTasksView, reviewView, graphView, contextView } from "./lib/adapters.js";
 import { resolveRepo, sameRepo, ankProgram, repoName, parentDir, touches, corpusChanges, GIT_ARGS } from "./lib/repo.js";
 import { sections, READS as SECTION_READS } from "./lib/sections.js";
 import { installedAgents, startCommand, claimableIds, CLAIMABLE_READ } from "./lib/start.js";
+import { acceptGate, acceptCommand, acceptOutcome } from "./lib/accept.js";
 
 const READS = [...SECTION_READS, CLAIMABLE_READ];
 
@@ -45,6 +46,7 @@ export default class Ank extends View {
     this.picking = null; // the task whose agent picker is open
     this.agents = null; // installed knownAgents(), null while asked
     this.pickError = null;
+    this.accepting = new Set(); // ids whose ank accept is running
     this.follow(focusedCwd());
   }
 
@@ -191,6 +193,27 @@ export default class Ank extends View {
     cx.notify();
   }
 
+  // The accept button: the mod's only writing command (ADR-99bc), on the
+  // default branch only. The refs/ank watch reloads the queue once it lands.
+  accept(id, cx) {
+    if (this.accepting.has(id) || !acceptGate(this.status).enabled) return;
+    let cmd;
+    try {
+      cmd = acceptCommand({ ank: this.ank, root: this.repo?.root, id });
+    } catch (e) {
+      notify({ title: `ank refused to accept ${id}`, body: String(e?.message ?? e), level: "error" });
+      return;
+    }
+    this.accepting.add(id);
+    cx.notify();
+    this.cx.spawn(async (cx) => {
+      const result = await run(cmd.program, cmd.args, cmd.cwd);
+      this.accepting.delete(id);
+      notify(acceptOutcome(id, result, cmd.program));
+      await this.reload(cx);
+    });
+  }
+
   picker(id, t) {
     const box = v_flex().pl(28).gap(2);
     if (this.pickError) return box.child(div().text_color(t.dim).child(this.pickError));
@@ -273,7 +296,15 @@ export default class Ank extends View {
       );
       return this.picking === r.id ? v_flex().child(h).child(this.picker(r.id, t)) : h;
     }
-    if (key === "queue") return h.child(id).child(title(r.title)).child(div().flex_shrink_0().text_color(t.dim).child(r.kind));
+    if (key === "queue") {
+      h.child(id).child(title(r.title)).child(div().flex_shrink_0().text_color(t.dim).child(r.kind));
+      const gate = acceptGate(this.status);
+      const busy = this.accepting.has(r.id);
+      const button = div().id(`ank-accept-${r.id}`).flex_shrink_0();
+      if (busy) return h.child(button.text_color(t.dim).child("accepting…"));
+      if (!gate.enabled) return v_flex().child(h.child(button.text_color(t.dim).child("accept"))).child(div().pl(28).text_color(t.dim).child(gate.reason));
+      return h.child(button.cursor_pointer().text_color(t.foreground).on_click((_e, cx) => this.accept(r.id, cx)).child("accept"));
+    }
     if (key === "tree") {
       const color = r.status === "in_progress" ? t.working : r.status === "done" ? t.done : t.foreground;
       return h.pl(14 + 14 * r.depth).child(div().flex_shrink_0().text_color(t.dim).child(r.depth ? "└" : "·")).child(id).child(title(r.title, color));

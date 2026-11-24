@@ -5,7 +5,7 @@ slug: action-accept-a-proposed-adr-or-spec-from-the-qu
 title: "Action: accept a proposed ADR or spec from the queue"
 created: 2026-11-24T14:19:09Z
 author: seanl@sean-laptop
-status: open
+status: in_progress
 scope:
   - mods/ank/**
   - tests/**
@@ -15,7 +15,7 @@ done_criteria: |
 criteria_by: creator
 verify: [mod-check, unit]
 schema: 4
-version: 1
+version: 2
 ---
 
 ank accept is the only writing command the mod may run.
