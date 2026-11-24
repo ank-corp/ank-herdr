@@ -5,7 +5,7 @@ slug: panel-pick-a-repo-by-hand
 title: "Panel: pick a repo by hand"
 created: 2026-11-24T15:50:49Z
 author: seanl@sean-laptop
-status: open
+status: done
 scope:
   - mods/ank/**
   - tests/**
@@ -17,8 +17,21 @@ done_criteria: |
 criteria_by: creator
 verify: [mod-check, unit]
 method: tdd
+proof:
+  - type: test
+    ref: local/04ccb4a9167a@9fbb6bb
+    tree: scope/0db3c3993f90
+    criteria: 936a6c3e103c
+    verifier: mod-check@eb2d5a0db17e
+    via: verifier
+  - type: test
+    ref: local/308b104afc26@9fbb6bb
+    tree: scope/0db3c3993f90
+    criteria: 936a6c3e103c
+    verifier: unit@60f17394a545
+    via: verifier
 schema: 4
-version: 1
+version: 3
 ---
 
 Asked by the person after installing: with the focus on a terminal outside any ank repo (a Claude session in Documents/Projects) the panel only says to focus a terminal inside an ank repository.
